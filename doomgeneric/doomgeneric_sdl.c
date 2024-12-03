@@ -1,6 +1,5 @@
 //doomgeneric for cross-platform development library 'Simple DirectMedia Layer'
 
-#include "doomkeys.h"
 #include "m_argv.h"
 #include "doomgeneric.h"
 
@@ -9,6 +8,14 @@
 
 #include <stdbool.h>
 #include <SDL.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <linux/input.h>
+#undef KEY_ENTER
+#include "doomkeys.h"
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
@@ -110,6 +117,64 @@ static void addKeyToQueue(int pressed, unsigned int keyCode){
   s_KeyQueueWriteIndex++;
   s_KeyQueueWriteIndex %= KEYQUEUE_SIZE;
 }
+
+int voiceHat_fd = -1;
+
+void handleVoiceHatInput() {
+    struct input_event ev;
+
+    if (voiceHat_fd == -1) {
+        // Open the voice hat event file
+        voiceHat_fd = open("/dev/input/event1", O_RDONLY | O_NONBLOCK); // Non-blocking mode
+        if (voiceHat_fd == -1) {
+            perror("Failed to open /dev/input/event0");
+            return;
+        }
+    }
+
+    // Non-blocking read
+    while (read(voiceHat_fd, &ev, sizeof(struct input_event)) > 0) {
+        if (ev.type == EV_KEY) {
+            int pressed = (ev.value == 1); // 1 for press, 0 for release
+            unsigned int doomKey = 0;
+            switch (ev.code) {
+                case KEY_PLAY:
+                    doomKey = KEY_ENTER; // Map to Doom's "Enter"
+                    break;
+                case KEY_NEXT:
+                    doomKey = KEY_RIGHTARROW; // Map to Doom's "Right Arrow"
+                    break;
+                case KEY_UP:
+                    doomKey = KEY_UPARROW; // Map to Doom's "Up Arrow"
+                    break;
+                case KEY_DOWN:
+                    doomKey = KEY_DOWNARROW; // Map to Doom's "Down Arrow"
+                    break;
+                case KEY_PREVIOUS:
+                    doomKey = KEY_LEFTARROW; // Map to Doom's "Left Arrow"
+                    break;
+                case KEY_MUTE:
+                    doomKey = KEY_ESCAPE; // Map to Doom's "Escape"
+                    break;
+                case KEY_SELECT:
+                    doomKey = KEY_FIRE;
+                    break;
+                default:
+                    // Ignore unhandled keys
+                    continue;
+            }
+
+            // Add the mapped key to the Doom key queue
+            addKeyToQueue(pressed, doomKey);
+        }
+    }
+
+    // Check for errors other than EAGAIN (no data available)
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        perror("Error reading from /dev/input/event0");
+    }
+}
+
 static void handleKeyInput(){
   SDL_Event e;
   while (SDL_PollEvent(&e)){
@@ -159,6 +224,7 @@ void DG_DrawFrame()
   SDL_RenderPresent(renderer);
 
   handleKeyInput();
+  handleVoiceHatInput();
 }
 
 void DG_SleepMs(uint32_t ms)
